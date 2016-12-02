@@ -346,6 +346,35 @@ accidents %>%
 
 ```
 
+```{r carto2}
+
+
+accidents %>% 
+  leaflet() %>% 
+  addTiles() %>% 
+  addCircleMarkers(data = accidents %>% filter(str_detect(vehicules, "VL seul")), 
+                   clusterOptions = markerClusterOptions(), 
+                   fillColor = "red",
+                   color = "red",
+                   popup = ~paste0("Ici a eu lien un accident impliquant ", `nombre de personnes impliquées`, " personnes, dont ", ifelse(`nombre de personnes tuées` > 0, paste0(`nombre de personnes tuées`, " mort(s), "), ""), ifelse(`nombre de personnes hospitalisées` > 0, paste0(`nombre de personnes hospitalisées`, " personne(s) hospitalisée(s) , "), ""), ifelse(`nombre de personnes blessées sans hospitalisation` > 0, paste0(`nombre de personnes blessées sans hospitalisation`, " personnes(s) blessée(s) sans hospitalisation", ""), ""), ". Les véhicules impliqués étaient les suivants : ", vehicules,"."), group = "Voitures") %>% 
+    addCircleMarkers(data = accidents %>% filter(str_detect(vehicules, "Motocyclette") | str_detect(vehicules, "Scooter") | str_detect(vehicules, "Cyclomoteur")), 
+                   clusterOptions = markerClusterOptions(), 
+                   fillColor = "#F1BC30",
+                   color = "#F1BC30",
+                   popup = ~paste0("Ici a eu lien un accident impliquant ", `nombre de personnes impliquées`, " personnes, dont ", ifelse(`nombre de personnes hospitalisées` > 0, paste0(`nombre de personnes hospitalisées`, " personne(s) hospitalisée(s)"), ""), ifelse(`nombre de personnes blessées sans hospitalisation` > 0, paste0(`nombre de personnes blessées sans hospitalisation`, " et personnes(s) blessée(s) sans hospitalisation", ""), ""), ". Les véhicules impliqués étaient les suivants : ", vehicules,"."), group = "Deux roues motorisés") %>% 
+  addCircleMarkers(data = accidents %>% filter(str_detect(vehicules, "Bicyclette")), 
+                   clusterOptions = markerClusterOptions(), 
+                   color = "#5DB579",
+                   fillColor = "#5DB579",
+                   popup = ~paste0("Ici a eu lien un accident impliquant ", `nombre de personnes impliquées`, " personnes, dont ", `nombre de personnes blessées sans hospitalisation`, " personnes(s) blessée(s) sans hospitalisation", ". Les véhicules impliqués étaient les suivants : ", vehicules,"."), group = "Vélos") %>% 
+  addCircleMarkers(data = accidents %>% filter(str_detect(vehicules, "VU") | str_detect(vehicules, "PL")), 
+                   clusterOptions = markerClusterOptions(), 
+                   color = "#694640",
+                   fillColor = "#694640",
+                   popup = ~paste0("Ici a eu lien un accident impliquant ", `nombre de personnes impliquées`, " personnes, dont ", `nombre de personnes blessées sans hospitalisation`, " personnes(s) blessée(s) sans hospitalisation", ". Les véhicules impliqués étaient les suivants : ", vehicules,"."), group = "Poids lourds et utilitaires") %>% 
+    addLayersControl(overlayGroups = c("Voitures", "Deux roues motorisés", "Deux roues motorisés", "Vélos", "Poids lourds et utilitaires"))
+```
+
 
 
 Boite noire : cette carte a été construite en utilisant [les données publiées par l'État](https://www.data.gouv.fr/fr/datasets/base-de-donnees-accidents-corporels-de-la-circulation/). Une partie des accidents (environ 14 %) n'a pu être cartographiée, faute de pouvoir être géolocalisée. À noter qu'il s'agit notamment de la plupart des accidents s'étant déroulés sur les autoroutes, dans les tunnels ou sur le Jarret. Soulignons aussi que cette source de données ne comporte pas les accidents n'ayant pas provoqué de victime corporelle (c'est-à-dire ayant provoqué au moins un blessé).
