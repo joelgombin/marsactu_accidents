@@ -1,0 +1,353 @@
+---
+title: "Faut-il être fou pour rouler à vélo à Marseille ?"
+author: "Joël Gombin"
+date: "25 novembre 2016"
+output: 
+  html_document:
+    fig_caption: true
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r packages}
+library(tidyverse)
+library(banR)
+library(hms)
+library(stringr)
+# library(rex)
+# rex_mode()
+library(lubridate)
+library(leaflet)
+library(sp)
+library(spdplyr)
+```
+
+```{r load_data}
+# source : https://www.data.gouv.fr/fr/datasets/base-de-donnees-accidents-corporels-de-la-circulation/
+caracteristiques <- read_csv("./caracteristiques_2015.csv", col_types = cols(
+  Num_Acc = col_character(),
+  an = col_integer(),
+  mois = col_integer(),
+  jour = col_integer(),
+  hrmn = col_character(),
+  lum = col_character(),
+  agg = col_character(),
+  int = col_character(),
+  atm = col_character(),
+  col = col_character(),
+  com = col_character(),
+  adr = col_character(),
+  gps = col_character(),
+  lat = col_character(),
+  long = col_character(),
+  dep = col_character()
+), na = c("0", "0000000", ".", ""))
+
+lieux <- read_csv("./lieux_2015.csv", col_types = cols(
+  Num_Acc = col_character(),
+  catr = col_character(),
+  voie = col_character(),
+  v1 = col_integer(),
+  v2 = col_character(),
+  circ = col_character(),
+  nbv = col_integer(),
+  pr = col_character(),
+  pr1 = col_integer(),
+  vosp = col_character(),
+  prof = col_character(),
+  plan = col_character(),
+  lartpc = col_integer(),
+  larrout = col_integer(),
+  surf = col_character(),
+  infra = col_character(),
+  situ = col_character(),
+  env1 = col_character()
+), na = c("0","00", "0000000","000", ".", ""))
+
+usagers <- read_csv("./usagers_2015.csv", col_types = cols(
+  Num_Acc = col_character(),
+  place = col_character(),
+  catu = col_character(),
+  grav = col_character(),
+  sexe = col_character(),
+  trajet = col_character(),
+  secu = col_character(),
+  locp = col_character(),
+  actp = col_character(),
+  etatp = col_character(),
+  an_nais = col_integer(),
+  num_veh = col_character()
+), na = c("0","00", "0000000","000", ".", ""))
+
+vehicules <- read_csv("./vehicules_2015.csv", col_types = cols(
+  Num_Acc = col_character(),
+  senc = col_character(),
+  catv = col_character(),
+  occutc = col_integer(),
+  obs = col_character(),
+  obsm = col_character(),
+  choc = col_character(),
+  manv = col_character(),
+  num_veh = col_character()
+), na = c("0","00", "0000000","000", ".", ""))
+
+```
+
+```{r preparation}
+df <- usagers %>% 
+  left_join(vehicules) %>% 
+  left_join(caracteristiques) %>% 
+  left_join(lieux) %>% 
+  mutate(codeinsee = paste0(substr(dep, 1,2), com)) %>% 
+#  filter(codeinsee %in% "13055") %>% 
+  mutate(lat = as.numeric(lat) / 100000,
+         long = as.numeric(long) / 100000,
+         temps = ymd_hm(paste0("20", an, "-", str_pad(mois, width = 2, side = "left", "0"), "-", str_pad(jour, width = 2, side = "left", "0"), " ", str_sub(str_pad(hrmn, width = 4, side = "left", "0"), 1, 2), ":", str_sub(str_pad(hrmn, width = 4, side = "left", "0"), 3, 4)))) %>% 
+  mutate(Intersection = recode(int, "1" = "Hors intersection",
+                           "2" = "Intersection en X",
+                           "3" = "Intersection en T",
+                           "4" = "Inetrsection en Y",
+                           "5" = "Intersection à plus de 4 branches",
+                           "6" = "Giratoire",
+                           "7" = "Place",
+                           "8" = "Passage à niveau",
+                           "9" = "Autre intersection"),
+         `Conditions atmosphériques` = recode(atm, 
+                      "1" = "Normale",
+                      "2" = "Pluie légère",
+                      "3" = "Pluie forte",
+                      "4" = "Neige - grêle",
+                      "5" = "Brouillard - fumée",
+                      "6" = "Vent fort - tempête",
+                      "7" = "Temps éblouissant",
+                      "8" = "Temps couvert",
+                      "9" = "Autre"),
+         `Type de collision` = recode(col,
+                      "1" = "Deux véhicules – frontale",
+                      "2" = "Deux véhicules – par l’arrière",
+                      "3" = "Deux véhicules – par le coté",
+                      "4" = "Trois véhicules et plus – en chaîne",
+                      "5" = "Trois véhicules et plus – collisions multiples",
+                      "6" = "Autre collision",
+                      "7" = "Sans collision"),
+         `Y a-t-il une voie réservée ?` = recode(vosp,
+                       "1" = "Piste cyclable",
+                       "2" = "Banque cyclable",
+                       "3" = "Voie réservée"),
+         `Déclivité de la route` = recode(prof,
+                       "1" = "Plat",
+                       "2" = "Pente",
+                       "3" = "Sommet de côte",
+                       "4" = "Bas de côte"),
+         `État de la surface` = recode(surf,
+                       "1" = "normale",
+                       "2" = "mouillée",
+                       "3" = "flaques",
+                       "4" = "inondée",
+                       "5" = "enneigée",
+                       "6" = "boue",
+                       "7" = "verglacée",
+                       "8" = "corps gras - huile",
+                       "9" = "autre"),
+         `Aménagement - Infrastructure` = recode(infra,
+                        "1" = "Souterrain - tunnel",
+                        "2" = "Pont - autopont",
+                        "3" = "Bretelle d’échangeur ou de raccordement",
+                        "4" = "Voie ferrée",
+                        "5" = "Carrefour aménagé",
+                        "6" = "Zone piétonne",
+                        "7" = "Zone de péage"),
+         `Situation de l’accident` = recode(situ,
+                       "1" = "Sur chaussée",
+                       "2" = "Sur bande d’arrêt d’urgence",
+                       "3" = "Sur accotement",
+                       "4" = "Sur trottoir",
+                       "5" = "Sur piste cyclable"),
+         `Catégorie du véhicule ` = recode(catv,
+                       "01" = "Bicyclette",
+                       "02" = "Cyclomoteur <50cm3",
+                       "03" = "Voiturette (Quadricycle à moteur carrossé) (anciennement 'voiturette ou tricycle à moteur')",
+                       "04" = "Référence plus utilisée depuis 2006 (scooter immatriculé)",
+                       "05" = "Référence plus utilisée depuis 2006 (motocyclette)",
+                       "06" = "Référence plus utilisée depuis 2006 (side-car)",
+                       "07" = "VL seul",
+                       "10" = "VU seul 1,5T <= PTAC <= 3,5T avec ou sans remorque (anciennement VU seul 1,5T <= PTAC <=3,5T)",
+                       "13" = "PL seul 3,5T <PTCA <= 7,5T",
+                       "14" = "PL seul > 7,5T",
+                       "15" = "PL > 3,5T + remorque",
+                       "16" = "Tracteur routier seul",
+                       "17" = "Tracteur routier + semi-remorque",
+                       "18" = "Référence plus utilisée depuis 2006 (transport en commun)",
+                       "19" = "Référence plus utilisée depuis 2006 (tramway)",
+                       "20" = "Engin spécial",
+                       "21" = "Tracteur agricole",
+                       "30" = "Scooter < 50 cm3",
+                       "31" = "Motocyclette > 50 cm3 et <= 125 cm3",
+                       "32" = "Scooter > 50 cm3 et <= 125 cm3",
+                       "33" = "Motocyclette > 125 cm3",
+                       "34" = "Scooter > 125 cm3",
+                       "35" = "Quad léger <= 50 cm3 (Quadricycle à moteur non carrossé)",
+                       "36" = "Quad lourd > 50 cm (Quadricycle à moteur non carrossé)",
+                       "37" = "Autobus",
+                       "38" = "Autocar",
+                       "39" = "Train",
+                       "40" = "Tramway",
+                       "99" = "Autre véhicule",
+                       .default = NULL),
+         `Obstacle fixe heurté` = recode(obs,
+                      "1" = "Véhicule en stationnement",
+                      "2" = "Arbre",
+                      "3" = "Glissière métallique",
+                      "4" = "Glissière béton",
+                      "5" = "Autre glissière",
+                      "6" = "Bâtiment, mur, pile de pont",
+                      "7" = "Support de signalisation verticale ou poste d’appel d’urgence",
+                      "8" = "Poteau",
+                      "9" = "Mobilier urbain",
+                      "10" = "Parapet",
+                      "11" = "Ilot, refuge, borne haute",
+                      "12" = "Bordure de trottoir",
+                      "13" = "Fossé, talus, paroi rocheuse",
+                      "14" = "Autre obstacle fixe sur chaussée",
+                      "15" = "Autre obstacle fixe sur trottoir ou accotement",
+                      "16" = "Sortie de chaussée sans obstacle"),
+        `Obstacle mobile heurté` = recode(obsm,
+                       "1" = "Piéton",
+                       "2" = "Véhicule",
+                       "4" = "Véhicule sur rail",
+                       "5" = "Animal domestique",
+                       "6" = "Animal sauvage",
+                       "9" = "Autre"),
+         `Catégorie d'usager` = recode(catu,
+                       "1" = "Conducteur",
+                       "2" = "Passager",
+                       "3" = "Piéton",
+                       "4" = "Piéton en roller ou en trottinette"),
+         `Gravité de l'accident` = recode(grav,
+                       "1" = "Indemne",
+                       "2" = "Tué",
+                       "3" = "Blessé hospitalisé",
+                       "4" = "Blessé léger"),
+         Sexe = recode(sexe,
+                       "1" = "Masculin",
+                       "2" = "Féminin"),
+         Age = 2015 - as.integer(an_nais),
+         `Motif du déplacement au moment de l’accident` = recode(trajet,
+                         "1" = "Domicile – travail",
+                         "2" = "Domicile – école",
+                         "3" = "Courses – achats",
+                         "4" = "Utilisation professionnelle",
+                         "5" = "Promenade – loisirs",
+                         "9" = "Autre"),
+         `Équipement de sécurité` = recode(secu,
+                       "11" = "Ceinture utilisée",
+                       "12" = "Centure non utilisée",
+                       "21" = "Casque porté",
+                       "22" = "Casque non porté",
+                       "31" = "Dispositif enfants utilisé",
+                       "32" = "Dispositif enfants non utilisé",
+                       "41" = "Équipement réfléchissant utilisé",
+                       "42" = "Équipement réfléchissant non utilisé",
+                       .default = NULL),
+         `Localisation du piéton` = recode(locp,
+                                           "1" = "A + 50 m du passage piéton",
+                                           "2" = "A – 50 m du passage piéton",
+                                           "3" = "Sur passage piéton sans signalisation lumineuse",
+                                           "4" = "Sur passage piéton avec signalisation lumineuse",
+                                           "5" = "Sur trottoir",
+                                           "6" = "Sur accotement",
+                                           "7" = "Sur refuge ou BAU",
+                                           "8" = "Sur contre allée"),
+         `Le piéton blessé était` = recode(etatp,
+                                           "1" = "Seul",
+                                           "2" = "Accompagné",
+                                           "3" = "En groupe"))
+
+df_marseille <- df %>% 
+  filter(codeinsee %in% "13055")
+
+# géolocalisation
+# API adresse.data.gouv.fr en panne ? On le fait directement sur le site
+
+# ageolocaliser <- df_marseille %>% 
+#   filter(is.na(lat) | is.na(long)) %>% 
+#   select(Num_Acc, adr, codeinsee)
+# 
+# write_csv(ageolocaliser, "./ageolocaliser.csv")
+# 
+# geolocalise <- read_csv("./geocoded.csv", col_types = cols(.default = col_character(),
+#                                                            latitude = col_double(),
+#                                                            longitude = col_double(),
+#                                                            result_score = col_double()))
+
+# marche très mal : peu d'adresses géolocalisées, avec un faible score 
+
+victimes <- df_marseille %>% 
+  group_by(Num_Acc) %>% 
+  summarise(categorie = ifelse(any(`Gravité de l'accident` %in% "Tué"),
+                            "accident mortel",
+                            ifelse(any(`Gravité de l'accident` %in% "Blessé hospitalisé"),
+                                   "accident avec hospitalisation",
+                                   "accident corporel sans hospitalisation")),
+            `nombre de personnes impliquées` = n(),
+            `nombre de personnes tuées` = sum(`Gravité de l'accident` %in% "Tué"),
+            `nombre de personnes hospitalisées` = sum(`Gravité de l'accident` %in% "Blessé hospitalisé"),
+            `nombre de personnes blessées sans hospitalisation` = sum(`Gravité de l'accident` %in% "Blessé léger"),
+            `Nombre de conducteurs concernés` = sum(`Catégorie d'usager` %in% "Conducteur"),
+            `Nombre de passagers concernés` = sum(`Catégorie d'usager` %in% "Passager"),
+            `Nombre de piétons concernés` = sum(`Catégorie d'usager` %in% c("Piéton", "Piéton en roller ou en trottinette")),
+            lat = unique(lat),
+            long = unique(long))
+
+vehicules <-  df_marseille %>% 
+      group_by(Num_Acc, num_veh) %>% 
+      distinct(`Catégorie du véhicule `) %>% 
+      ungroup() %>% 
+      group_by(Num_Acc) %>% 
+      summarise(vehicules = paste0(`Catégorie du véhicule `, collapse = ", "))
+
+accidents <- left_join(victimes, vehicules) %>% 
+  filter(!is.na(lat) & !is.na(long))
+
+```
+
+Il y a eu en 2015 2409 accidents de la circulation ayant fait au moins une victime nécessitant des soins à Marseille, répertoriés par les forces de l'ordre. Ils ont impliqué 4129 véhicules et 5191 personnes -- quelle que soit la gravité des dommages subis par elles, si elles en ont subi. Au total, 34 personnes ont été tuées, 684 hospitalisées, et 2346 ont subi une blessure légère. À  titre de comparaison, la même année à Paris, on comptait 47 morts et 702 victimes hospitalisées. 
+
+Ce week end, en exclusivité intergalactique pour Marsactu, retrouvez la carte des accidents corporels ayant eu lieu à Marseille en 2015. N'hésitez pas à utiliser les commentaires pour indiquer les points problématiques connus dans votre quartier, les raisons pour lesquelles vous pouvez observer telle ou telle concentration d'accidents, etc.
+
+```{r carto}
+
+coordinates(accidents) <- ~long+lat
+proj4string(accidents) <- CRS("+init=epsg:4326")
+
+accidents %>% 
+  leaflet() %>% 
+  addTiles() %>% 
+  addCircleMarkers(data = accidents %>% filter(categorie %in% "accident mortel"), 
+#                   clusterOptions = markerClusterOptions(), 
+                   fillColor = "red",
+                   color = "red",
+                   popup = ~paste0("Ici a eu lien un accident impliquant ", `nombre de personnes impliquées`, " personnes, dont ", ifelse(`nombre de personnes tuées` > 0, paste0(`nombre de personnes tuées`, " mort(s), "), ""), ifelse(`nombre de personnes hospitalisées` > 0, paste0(`nombre de personnes hospitalisées`, " personne(s) hospitalisée(s) , "), ""), ifelse(`nombre de personnes blessées sans hospitalisation` > 0, paste0(`nombre de personnes blessées sans hospitalisation`, " personnes(s) blessée(s) sans hospitalisation", ""), ""), ". Les véhicules impliqués étaient les suivants : ", vehicules,"."), group = "accidents mortels") %>% 
+    addCircleMarkers(data = accidents %>% filter(categorie %in% "accident avec hospitalisation"), 
+                   clusterOptions = markerClusterOptions(), 
+                   fillColor = "#F1BC30",,
+                   color = "#F1BC30",
+                   popup = ~paste0("Ici a eu lien un accident impliquant ", `nombre de personnes impliquées`, " personnes, dont ", ifelse(`nombre de personnes hospitalisées` > 0, paste0(`nombre de personnes hospitalisées`, " personne(s) hospitalisée(s)"), ""), ifelse(`nombre de personnes blessées sans hospitalisation` > 0, paste0(`nombre de personnes blessées sans hospitalisation`, " et personnes(s) blessée(s) sans hospitalisation", ""), ""), ". Les véhicules impliqués étaient les suivants : ", vehicules,"."), group = "accidents avec hospitalisation") %>% 
+  addCircleMarkers(data = accidents %>% filter(categorie %in% "accident corporel sans hospitalisation"), 
+                   clusterOptions = markerClusterOptions(), 
+                   color = "#5DB579",
+                   fillColor = "#5DB579",
+                   popup = ~paste0("Ici a eu lien un accident impliquant ", `nombre de personnes impliquées`, " personnes, dont ", `nombre de personnes blessées sans hospitalisation`, " personnes(s) blessée(s) sans hospitalisation", ". Les véhicules impliqués étaient les suivants : ", vehicules,"."), group = "accidents sans hospitalisation") %>% 
+    addLayersControl(overlayGroups = c("accidents mortels", "accidents avec hospitalisation", "accidents sans hospitalisation"))
+  
+
+```
+
+
+
+Boite noire : cette carte a été construite en utilisant [les données publiées par l'État](https://www.data.gouv.fr/fr/datasets/base-de-donnees-accidents-corporels-de-la-circulation/). Une partie des accidents (environ 14 %) n'a pu être cartographiée, faute de pouvoir être géolocalisée. À noter qu'il s'agit notamment de la plupart des accidents s'étant déroulés sur les autoroutes, dans les tunnels ou sur le Jarret. Soulignons aussi que cette source de données ne comporte pas les accidents n'ayant pas provoqué de victime corporelle (c'est-à-dire ayant provoqué au moins un blessé).
+
+
